@@ -5,91 +5,144 @@ public class Program
 {
     static void Main(string[] args)
     {
-        double spotPrice = 815.45;
-        double strikePrice = 870;
-        int expiryDays = 8;
         double riskFreeRate = 0.1;
-        double dividend = 0;
-        double callPremium = 0.90; //66.54
-        double putPremium = 52.61;  //54
 
-        Console.WriteLine("\nCALL");
+        //double[] strikePrices = [740, 750, 760, 770, 780, 790, 800, 810, 820, 830, 840, 850, 860, 870, 880];
+        //double[] call_premiums = [84.60, 72.30, 63.45, 54.20, 45.80, 37.70, 30.55, 24.55, 19.30, 14.60, 10.90, 8.10, 5.90, 4.40, 3.35];
+        //double[] put_premiums = [1.75, 2.30, 3.05, 4.10, 5.60, 7.65, 10.55, 14.20, 18.90, 24.20, 30.40, 37.95, 45.20, 53.75, 62.40];
 
-        var volatility = GetVolatility(spotPrice, strikePrice, expiryDays, riskFreeRate, dividend, Option.Type.Call, callPremium);
+        double[] strikePrices = [700, 750, 760, 770, 780, 790, 800, 810, 820, 830, 840, 850, 860, 870, 950];
+        double[] call_premiums = [118.80, 68.25, 58.45, 49.20, 39.55, 30.55, 22.55, 15.45, 10, 5.90, 3.40, 2.15, 1.35, 0.9, 0.25];
+        double[] put_premiums = [0.30, 0.55, 0.75, 1.15, 1.75, 2.80, 4.60, 7.40, 11.85, 17.90, 25.35, 34.20, 44.05, 53, 133.50];
 
-        Console.WriteLine("Implied Volatility: " + volatility);
+        for (int i = 0; i < strikePrices.Length; i++)
+        {
+            riskFreeRate = 0.1;
+            double spotPrice = 815.45;
+            //double spotPrice = 814.95;
+            double strikePrice = strikePrices[i];
+            int expiryDays = 8;
+            //int expiryDays = 27;
+            double dividend = 0;
+            double callPremium = call_premiums[i];
+            double putPremium = put_premiums[i];
 
-        CalculateGreeks(spotPrice, strikePrice, expiryDays, riskFreeRate, volatility, dividend, Option.Type.Call);
+            //var volatility = GetVolatility(spotPrice, strikePrice, expiryDays, riskFreeRate, dividend, Option.Type.Call, callPremium);
+            //Console.WriteLine(ConvertToPercentage(volatility));
 
-        Console.WriteLine("\nPUT");
+            var volatility = GetVolatility(spotPrice, strikePrice, expiryDays, riskFreeRate, dividend, Option.Type.Put, putPremium);
+            Console.WriteLine(ConvertToPercentage(volatility));
 
-        volatility = GetVolatility(spotPrice, strikePrice, expiryDays, riskFreeRate, dividend, Option.Type.Put, putPremium);
+            //riskFreeRate = 0.066342;
+            //riskFreeRate = 0.066152;
 
-        Console.WriteLine("Implied Volatility: " + volatility);
+            //Console.WriteLine("\nCALL Greeks");
+            //var option = GetOption(spotPrice, strikePrice, expiryDays, riskFreeRate, volatility, dividend, Option.Type.Call);
+            //var option = GetOption(spotPrice, strikePrice, expiryDays, riskFreeRate, volatility, dividend, Option.Type.Put);
 
-        CalculateGreeks(spotPrice, strikePrice, expiryDays, riskFreeRate, volatility, dividend, Option.Type.Put);
+            //Console.WriteLine(GetDelta(option));
+            //Console.WriteLine(GetTheta(option));
+            //Console.WriteLine(GetGamma(option));
+            //Console.WriteLine(GetVega(option));
+
+            //Co0nsole.WriteLine("\nPUT Greeks");
+            //CalculateGreeks(spotPrice, strikePrice, expiryDays, riskFreeRate, volatility, dividend, Option.Type.Put);
+
+            //Console.WriteLine("\n\n");
+        }
     }
 
-    private static void CalculateGreeks(double spotPrice, double strikePrice, int expiryDays, double rate, double valatility, double divindend, Option.Type optionType)
+    private static double ConvertToPercentage(double value) => Math.Round(value * 100, 2);
+
+    private static VanillaOption GetOption(double spotPrice, double strikePrice, int expiryDays, double rate, double volatility, double dividend, Option.Type optionType)
     {
         // Payoff and Exercise
         var payoff = new PlainVanillaPayoff(optionType, strikePrice);
         var exercise = new EuropeanExercise(Date.todaysDate() + expiryDays);
 
-        // Risk-free rate curve
-        var riskFreeRate = new FlatForward(Date.todaysDate(), rate, new Actual360());
+        // Bootstrapped risk-free rate curve with more accurate day count convention
+        var riskFreeRate = new FlatForward(Date.todaysDate(), rate, new Actual365Fixed());
+        var discountTermStructure = new YieldTermStructureHandle(riskFreeRate);
 
-        // Volatility surface
-        var flatVolTS = new BlackConstantVol(Date.todaysDate(), new NullCalendar(), valatility, new Actual360());
+        // Bootstrapped dividend yield curve with more accurate day count convention
+        var dividendYield = new FlatForward(Date.todaysDate(), dividend, new Actual365Fixed());
+        var dividendTermStructure = new YieldTermStructureHandle(dividendYield);
 
-        var dividendYield = new FlatForward(Date.todaysDate(), divindend, new Actual360());
+        // Use a more accurate guess for the flat volatility term structure
+        var flatVolTS = new BlackConstantVol(Date.todaysDate(), new NullCalendar(), volatility, new Actual365Fixed());
+        var volatilityTermStructure = new BlackVolTermStructureHandle(flatVolTS);
 
-        // Black-Sh-oles process
         var process = new BlackScholesMertonProcess(
             new QuoteHandle(new SimpleQuote(spotPrice)),
-            new YieldTermStructureHandle(dividendYield),
-            new YieldTermStructureHandle(riskFreeRate),
-            new BlackVolTermStructureHandle(flatVolTS));
+            dividendTermStructure,
+            discountTermStructure,
+            volatilityTermStructure);
 
-        // Option pricing engine
         var engine = new AnalyticEuropeanEngine(process);
         var option = new VanillaOption(payoff, exercise);
         option.setPricingEngine(engine);
 
-        // Output the Greeks
-        Console.WriteLine("Delta: " + option.delta());
-        Console.WriteLine("Gamma: " + option.gamma());
-        Console.WriteLine("Theta: " + option.thetaPerDay());
-        Console.WriteLine("Vega: " + option.vega());
-        Console.WriteLine("Rho: " + option.rho());
-
-        Console.WriteLine();
+        return option;
     }
 
-    private static double GetVolatility(double spotPrice, double strikePrice, int expiryDays, double rate, double divindend, Option.Type optionType, double currentMarketPrice)
+    public static double GetDelta(VanillaOption vanillaOption)
     {
+        return Math.Round(vanillaOption.delta(), 3);
+    }
+
+    public static double GetGamma(VanillaOption vanillaOption)
+    {
+        return Math.Round(vanillaOption.gamma(), 3);
+    }
+
+    public static double GetTheta(VanillaOption vanillaOption)
+    {
+        return Math.Round(vanillaOption.thetaPerDay(), 3);
+    }
+
+    public static double GetVega(VanillaOption vanillaOption)
+    {
+        return Math.Round(vanillaOption.vega() / 100, 3);
+    }
+
+    public static double GetRho(VanillaOption vanillaOption)
+    {
+        return Math.Round(vanillaOption.rho(), 3);
+    }
+
+    public static double GetVolatility(
+        double spotPrice, double strikePrice, int expiryDays, double rate, double dividend,
+        Option.Type optionType, double currentMarketPrice)
+    {
+        // Payoff and exercise
         var payoff = new PlainVanillaPayoff(optionType, strikePrice);
         var exercise = new EuropeanExercise(Date.todaysDate() + expiryDays);
 
-        // Risk-free rate curve
-        var riskFreeRate = new FlatForward(Date.todaysDate(), rate, new Actual360());
+        // Bootstrapped risk-free rate curve with more accurate day count convention
+        var riskFreeRate = new FlatForward(Date.todaysDate(), rate, new Actual365Fixed());
+        var discountTermStructure = new YieldTermStructureHandle(riskFreeRate);
 
-        var flatVolTS = new BlackConstantVol(Date.todaysDate(), new NullCalendar(), 0, new Actual360());
+        // Bootstrapped dividend yield curve with more accurate day count convention
+        var dividendYield = new FlatForward(Date.todaysDate(), dividend, new Actual365Fixed());
+        var dividendTermStructure = new YieldTermStructureHandle(dividendYield);
 
-        var dividendYield = new FlatForward(Date.todaysDate(), divindend, new Actual360());
+        // Use a more accurate guess for the flat volatility term structure
+        var initialVolGuess = 0.20; // Initial guess at 20%, can be adjusted
+        var flatVolTS = new BlackConstantVol(Date.todaysDate(), new NullCalendar(), initialVolGuess, new Actual365Fixed());
+        var volatilityTermStructure = new BlackVolTermStructureHandle(flatVolTS);
 
-        // Black-Sholes process
         var process = new BlackScholesMertonProcess(
             new QuoteHandle(new SimpleQuote(spotPrice)),
-            new YieldTermStructureHandle(dividendYield),
-            new YieldTermStructureHandle(riskFreeRate),
-            new BlackVolTermStructureHandle(flatVolTS));
+            dividendTermStructure,
+            discountTermStructure,
+            volatilityTermStructure);
 
-        // Option pricing engine
         var engine = new AnalyticEuropeanEngine(process);
         var option = new VanillaOption(payoff, exercise);
         option.setPricingEngine(engine);
 
-        return option.impliedVolatility(currentMarketPrice, process, 1e-6, 1000, 1e-6, 5.0);
+        double impliedVolatility = option.impliedVolatility(currentMarketPrice, process);
+
+        return impliedVolatility;
     }
 }
